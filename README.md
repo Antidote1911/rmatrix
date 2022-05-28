@@ -1,3 +1,5 @@
+[![Cargo Build](https://github.com/Antidote1911/rmatrix/actions/workflows/ci.yml/badge.svg)](https://github.com/Antidote1911/rmatrix/actions/workflows/ci.yml)
+
 # rmatrix
 Generates a 'Matrix'-like screen of falling characters in your terminal
 [![rmatrix](rmatrix.gif)](https://asciinema.org/a/IjJyH88BeocsHvJpKJYqvmnuT)
