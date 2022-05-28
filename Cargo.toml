@@ -1,0 +1,14 @@
+[package]
+name = "rmatrix"
+description = "Rust port of cmatrix."
+version = "0.2.1"
+edition = "2021"
+authors = ["Antidote1911 <antidote1911@gmail.com>"]
+license = 'GPL-3.0-or-later'
+
+[dependencies]
+pancurses = "0.17.0"
+rand = { version = "0.8.5", features = ["small_rng"] }
+signal-hook = { version = "0.3.14", features = ["extended-siginfo"] }
+clap = { version = "3.1.8", features = ["derive","cargo"] }
+term_size = "0.3.2"
