@@ -6,8 +6,17 @@ The original [`cmatrix`](https://github.com/abishekvashok/cmatrix) was written i
 The rust version is memory-safe, and doesn't crash so easily. Both versions have comparable performance, due to the underlying use of `ncurses`.
 
 ## Controls
-//todo
 
-### cargo
-`cargo install rmatrix`
+qwerty keyboards:  
+`q` red, `w` green, `e` yellow, `r` blue, `t` pink, `y` white, `u` cyan, `i` rainbow
 
+azerty keyboards:  
+`a` red, `z` green, `e` yellow, `r` blue, `t` pink, `y` white, `u` cyan, `i` rainbow
+
+`j` - Jap characters  
+`c` - Classic characters
+
+`0-9` speed of rain
+
+### Build
+`cargo build --release` or `cargo install rmatrix`
