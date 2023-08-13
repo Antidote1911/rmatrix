@@ -10,5 +10,5 @@ license = 'GPL-3.0-or-later'
 pancurses = "0.17.0"
 rand = { version = "0.8.5", features = ["small_rng"] }
 signal-hook = { version = "0.3.14", features = ["extended-siginfo"] }
-clap = { version = "3.1.8", features = ["derive","cargo"] }
+clap = { version = "4.3.21", features = ["derive","cargo"] }
 term_size = "0.3.2"

@@ -1,7 +1,7 @@
 use pancurses::*;
 use std::ops::RangeInclusive;
 
-use clap::{AppSettings, ArgEnum, Parser};
+use clap::{ValueEnum, Parser, ArgAction};
 
 const AUTHOR: &str = "
 Author : Fabrice Corraire <antidote1911@gmail.com>
@@ -9,13 +9,13 @@ Github : https://github.com/Antidote1911/
 ";
 
 #[derive(Parser)]
-#[clap(global_setting(AppSettings::DeriveDisplayOrder))]
+
 #[clap(about, author=AUTHOR, version)]
 /// The struct for handling command line arguments
 struct Opt {
-    #[clap(short = 'b', parse(from_occurrences))]
+    #[clap(short = 'b', action = ArgAction::Count)]
     /// Bold characters on
-    bold: isize,
+    bold: u8,
 
     #[clap(short = 'l', long = "console")]
     /// Linux mode (use matrix console font)
@@ -33,20 +33,20 @@ struct Opt {
     /// X window mode, use if your xterm is using mtx.pcf
     xwindow: bool,
 
-    #[clap(short = 'u', long = "update", default_value = "4", parse(try_from_str=update_in_range))]
+    #[clap(short = 'u', long = "update", default_value = "4", value_parser=update_in_range)]
     /// Screen update delay
     update: usize,
 
     #[clap(
         short = 'C',
         long = "colour",
-        arg_enum,
+        value_enum,
         name = "COLOR",
         default_value = "green"
     )]
     colour: Colors,
 
-    #[clap(short = 'c', long = "characters", arg_enum, default_value = "classic")]
+    #[clap(short = 'c', long = "characters", value_enum, default_value = "classic")]
     characters: Characters,
 
     #[clap(short = 'r', long = "rainbow")]
@@ -54,14 +54,14 @@ struct Opt {
     rainbow: bool,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Characters {
     Classic,
     Jap,
     Digits
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ArgEnum)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
 pub enum Colors {
     Green,
     Red,
@@ -91,7 +91,7 @@ fn update_in_range(s: &str) -> Result<usize, String> {
 
 /// The global state object
 pub struct Config {
-    pub bold: isize,
+    pub bold: u8,
     pub characters: Characters,
     pub console: bool,
     pub oldstyle: bool,
