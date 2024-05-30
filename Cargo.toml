@@ -9,6 +9,6 @@ license = 'GPL-3.0-or-later'
 [dependencies]
 pancurses = "0.17.0"
 rand = { version = "0.8.5", features = ["small_rng"] }
-signal-hook = { version = "0.3.14", features = ["extended-siginfo"] }
-clap = { version = "4.3.21", features = ["derive","cargo"] }
+signal-hook = { version = "0.3.17", features = ["extended-siginfo"] }
+clap = { version = "4.5.4", features = ["derive","cargo"] }
 term_size = "0.3.2"
