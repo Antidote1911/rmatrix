@@ -1,3 +1,8 @@
 Cargo.lock
 /target/
 **/*.rs.bk
+target/
+node_modules/
+.env
+dist/
+__pycache__/
