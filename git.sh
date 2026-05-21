@@ -33,7 +33,7 @@ require_git() {
 
 # ── Gestion des dossiers à ignorer ───────────────────────────────────────────
 # Liste des patterns à toujours ignorer (personnalisable)
-IGNORE_PATTERNS=("target/" ".idea/" "build/" "node_modules/" ".env" "dist/" "__pycache__/")
+IGNORE_PATTERNS=("target/" "node_modules/" ".env" "dist/" "__pycache__/")
 
 setup_gitignore() {
   [[ ! -f .gitignore ]] && touch .gitignore
@@ -288,6 +288,88 @@ do_full_reset() {
   success "✅ Reset terminé. Historique effacé, fichiers intacts."
 }
 
+
+# ── Purge d'un fichier trop gros de tout l'historique ────────────────────────
+do_purge_large_file() {
+  title "Purge fichier trop gros (>100 MB)"
+
+  echo -e "  ${YELLOW}Fichiers les plus lourds dans l'historique Git :${RESET}"
+  echo ""
+  # Lister les 10 plus gros objets trackés dans l'historique
+  git rev-list --objects --all 2>/dev/null     | git cat-file --batch-check='%(objecttype) %(objectname) %(objectsize) %(rest)' 2>/dev/null     | awk '/^blob/ { printf "%s\t%s\n", $3, $4 }'     | sort -rn     | head -10     | awk '{ printf "  %8.2f MB  %s\n", $1/1024/1024, $2 }'     || echo "  (impossible de lister)"
+  echo ""
+  sep
+  echo ""
+
+  read -rp "$(echo -e "${YELLOW}? ${RESET}Chemin du fichier à purger (ex: assets/model.nnue) : ")" filepath
+  [[ -z "$filepath" ]] && { error "Chemin vide — annulé."; return; }
+
+  echo ""
+  echo -e "  Fichier à supprimer de tout l'historique : ${RED}${filepath}${RESET}"
+  echo -e "  ${YELLOW}Le fichier restera sur ton disque, mais ne sera plus dans Git.${RESET}"
+  echo ""
+
+  read -rp "$(echo -e "${YELLOW}? ${RESET}Ajouter un pattern .gitignore pour éviter que ça se reproduise ? [O/n] ")" do_ignore
+  local ignore_pattern=""
+  if [[ ! "${do_ignore,,}" =~ ^n ]]; then
+    # Proposer d'ignorer par extension ou chemin exact
+    local ext="${filepath##*.}"
+    echo -e "  1) Ignorer ce fichier exact     : ${filepath}"
+    [[ "$ext" != "$filepath" ]] &&     echo -e "  2) Ignorer toute l'extension    : *.${ext}"
+    read -rp "$(echo -e "${YELLOW}? ${RESET}Choix [1] : ")" ichoice
+    case "${ichoice:-1}" in
+      2) ignore_pattern="*.${ext}" ;;
+      *) ignore_pattern="$filepath" ;;
+    esac
+  fi
+
+  echo ""
+  echo -e "${RED}Tape exactement${RESET} ${BOLD}PURGE${RESET} ${RED}pour confirmer (IRRÉVERSIBLE sur l'historique) :${RESET}"
+  read -rp "  → " confirm_word
+  [[ "$confirm_word" != "PURGE" ]] && { warn "Annulé."; return; }
+
+  echo ""
+  info "Réécriture de l'historique (filter-branch)..."
+  git filter-branch --force --index-filter     "git rm --cached --ignore-unmatch '${filepath}'"     --prune-empty --tag-name-filter cat -- --all
+
+  info "Nettoyage des refs résiduelles..."
+  git for-each-ref --format="delete %(refname)" refs/original 2>/dev/null | git update-ref --stdin || true
+  git reflog expire --expire=now --all
+  git gc --prune=now --aggressive
+  success "Historique nettoyé."
+
+  # Ajouter au .gitignore
+  if [[ -n "$ignore_pattern" ]]; then
+    if ! grep -qxF "$ignore_pattern" .gitignore 2>/dev/null; then
+      printf '%s
+' "$ignore_pattern" >> .gitignore
+      git add .gitignore
+      git commit -m "chore: ignore ${ignore_pattern}"
+      success "Pattern ajouté au .gitignore : ${ignore_pattern}"
+    fi
+  fi
+
+  # Force push
+  local branch
+  branch=$(git symbolic-ref --short HEAD)
+  local remote
+  remote=$(git remote get-url origin 2>/dev/null || echo "")
+
+  if [[ -n "$remote" ]]; then
+    if confirm "Force push vers origin/${branch} ?"; then
+      git push --force origin "$branch"
+      # Pusher aussi les tags si réécrits
+      git push --force --tags origin 2>/dev/null || true
+      success "Force push effectué ✓"
+    fi
+  else
+    warn "Pas de remote — purge locale uniquement."
+  fi
+
+  echo ""
+  success "✅ Fichier purgé de l'historique. Le push devrait maintenant fonctionner."
+}
+
 # ── Menu interactif ───────────────────────────────────────────────────────────
 main_menu() {
   while true; do
@@ -301,7 +383,7 @@ main_menu() {
       echo ""
     fi
 
-    echo -e "  ${BOLD}1${RESET}  Commit + Push            ${CYAN}← Let's Go !${RESET}"
+    echo -e "  ${BOLD}1${RESET}  Commit + Push            ${CYAN}← équivalent à ./git.sh \"msg\"${RESET}"
     echo -e "  ${BOLD}2${RESET}  Créer & pusher un tag"
     echo -e "  ${BOLD}3${RESET}  Pull / Synchroniser"
     echo -e "  ${BOLD}4${RESET}  Branches"
@@ -310,6 +392,7 @@ main_menu() {
     echo -e "  ${BOLD}7${RESET}  Status"
     echo -e "  ${BOLD}0${RESET}  Initialiser un nouveau dépôt"
     echo -e "  ${BOLD}r${RESET}  ${RED}Reset total${RESET} ${RED}(efface l'historique, garde les fichiers)${RESET}"
+    echo -e "  ${BOLD}f${RESET}  ${YELLOW}Purger un fichier trop gros${RESET} ${YELLOW}(fichier >100MB rejeté par GitHub)${RESET}"
     echo -e "  ${BOLD}q${RESET}  Quitter"
     echo ""
     sep
@@ -317,7 +400,7 @@ main_menu() {
     read -rp "$(echo -e "${YELLOW}➜ ${RESET}Choix : ")" choice
 
     case "$choice" in
-      1|2|3|4|5|6|7|r|R) require_git ;;
+      1|2|3|4|5|6|7|r|R|f|F) require_git ;;
     esac
 
     case "$choice" in
@@ -330,6 +413,7 @@ main_menu() {
       7) do_status ;;
       0) do_init ;;
       r|R) do_full_reset ;;
+      f|F) do_purge_large_file ;;
       q|Q) echo -e "\n${GREEN}À bientôt !${RESET}\n"; exit 0 ;;
       *) warn "Choix invalide." ;;
     esac
