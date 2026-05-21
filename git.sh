@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 #  git.sh — Assistant Git
-#  Usage rapide  : ./git.sh "mon message de commit"
+#  Usage rapide    : ./git.sh "mon message de commit"
 #  Menu interactif : ./git.sh
 # =============================================================================
 
@@ -33,11 +33,10 @@ require_git() {
 
 # ── Gestion des dossiers à ignorer ───────────────────────────────────────────
 # Liste des patterns à toujours ignorer (personnalisable)
-IGNORE_PATTERNS=("target/" "node_modules/" ".env" "dist/" "__pycache__/")
+IGNORE_PATTERNS=("target/" ".idea/" "build/" "node_modules/" ".env" "dist/" "__pycache__/")
 
 setup_gitignore() {
   [[ ! -f .gitignore ]] && touch .gitignore
-
   for pattern in "${IGNORE_PATTERNS[@]}"; do
     if ! grep -qxF "$pattern" .gitignore 2>/dev/null; then
       printf '%s\n' "$pattern" >> .gitignore
@@ -46,7 +45,6 @@ setup_gitignore() {
   done
 }
 
-# Retire du suivi Git les fichiers qui doivent être ignorés mais sont trackés
 untrack_ignored() {
   for pattern in "${IGNORE_PATTERNS[@]}"; do
     local dir="${pattern%/}"
@@ -57,19 +55,16 @@ untrack_ignored() {
   done
 }
 
-# ── Stage intelligent (exclut les patterns ignorés) ───────────────────────────
+# ── Stage intelligent ─────────────────────────────────────────────────────────
 smart_add() {
   set +e
-  # Construit les exclusions pour git add
   local excludes=()
   for p in "${IGNORE_PATTERNS[@]}"; do
     excludes+=(":!${p}" ":!${p}**")
   done
-
   if git add . -- "${excludes[@]}" 2>/dev/null; then
     success "Fichiers stagés (dossiers ignorés exclus)."
   else
-    # Fallback : add -A puis reset les ignorés
     git add -A
     for p in "${IGNORE_PATTERNS[@]}"; do
       git reset -- "$p" "${p}**" >/dev/null 2>&1 || true
@@ -79,19 +74,32 @@ smart_add() {
   set -e
 }
 
-# ── Commit + Push (cœur du script) ───────────────────────────────────────────
+# ── Bandeau branche ───────────────────────────────────────────────────────────
+show_branch_banner() {
+  local branch
+  branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "HEAD détachée")
+  local dirty=""
+  git diff --quiet 2>/dev/null || dirty=" ${RED}●${RESET}"
+  local remote
+  remote=$(git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]//' | sed 's/\.git$//' || echo "")
+
+  echo ""
+  echo -e "${BOLD}${BLUE}╔══════════════════════════════════════╗${RESET}"
+  printf "${BOLD}${BLUE}║${RESET}  🌿 %-34s${BOLD}${BLUE}║${RESET}\n" "${branch}${dirty@P}"
+  [[ -n "$remote" ]] && \
+  printf "${BOLD}${BLUE}║${RESET}  📦 %-34s${BOLD}${BLUE}║${RESET}\n" "$remote"
+  echo -e "${BOLD}${BLUE}╚══════════════════════════════════════╝${RESET}"
+  echo ""
+}
+
+# ── Commit + Push ─────────────────────────────────────────────────────────────
 commit_and_push() {
   local msg="${1:-}"
   local branch
   branch=$(git rev-parse --abbrev-ref HEAD)
 
-  info "Branche : ${GREEN}${branch}${RESET}"
-
-  # .gitignore + nettoyage index
   setup_gitignore
   untrack_ignored
-
-  # Vérifier s'il y a quelque chose à committer
   smart_add
 
   if git diff --cached --quiet; then
@@ -102,7 +110,6 @@ commit_and_push() {
     return
   fi
 
-  # Message de commit
   if [[ -z "$msg" ]]; then
     read -rp "$(echo -e "${YELLOW}? ${RESET}Message de commit : ")" msg
     [[ -z "$msg" ]] && msg="Update"
@@ -141,8 +148,7 @@ do_tag() {
   read -rp "$(echo -e "${YELLOW}? ${RESET}Nom du tag (ex: v1.2.3) : ")" tag
   [[ -z "$tag" ]] && { error "Nom vide — annulé."; return; }
   if git rev-parse "$tag" &>/dev/null 2>&1; then
-    error "Le tag '${tag}' existe déjà."
-    return
+    error "Le tag '${tag}' existe déjà."; return
   fi
   read -rp "$(echo -e "${YELLOW}? ${RESET}Message du tag (vide = tag léger) : ")" tmsg
   if [[ -n "$tmsg" ]]; then git tag -a "$tag" -m "$tmsg"; else git tag "$tag"; fi
@@ -223,6 +229,65 @@ do_init() {
   fi
 }
 
+# ── Reset total : fichiers conservés, historique effacé ───────────────────────
+do_full_reset() {
+  title "⚠️  Reset total du dépôt"
+
+  local branch remote
+  branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "main")
+  remote=$(git remote get-url origin 2>/dev/null || echo "")
+
+  echo -e "  ${RED}${BOLD}ATTENTION — Cette opération est IRRÉVERSIBLE.${RESET}"
+  echo ""
+  echo -e "  Ce qui va se passer :"
+  echo -e "  ${GREEN}✔${RESET} Tes fichiers actuels sont conservés"
+  echo -e "  ${RED}✖${RESET} Tout l'historique Git local est supprimé"
+  [[ -n "$remote" ]] && \
+  echo -e "  ${RED}✖${RESET} L'historique sur GitHub est écrasé (force push)"
+  echo -e "  ${GREEN}✔${RESET} Un seul nouveau commit initial sera créé"
+  echo ""
+  echo -e "  Branche : ${GREEN}${branch}${RESET}"
+  [[ -n "$remote" ]] && echo -e "  Remote  : ${remote}"
+  echo ""
+  sep
+  echo ""
+  echo -e "${RED}Tape exactement${RESET} ${BOLD}RESET${RESET} ${RED}pour confirmer (ou Entrée pour annuler) :${RESET}"
+  read -rp "  → " confirm_word
+  if [[ "$confirm_word" != "RESET" ]]; then
+    warn "Annulé."
+    return
+  fi
+
+  read -rp "$(echo -e "${YELLOW}? ${RESET}Message du commit initial [\"Initial commit\"] : ")" init_msg
+  init_msg="${init_msg:-Initial commit}"
+
+  echo ""
+  info "Suppression du dossier .git..."
+  rm -rf .git
+
+  info "Réinitialisation du dépôt..."
+  git init -b "$branch" 2>/dev/null || { git init && git checkout -b "$branch" 2>/dev/null || true; }
+
+  info "Ajout de tous les fichiers..."
+  setup_gitignore
+  smart_add
+
+  git commit -m "$init_msg"
+  success "Nouveau commit initial créé : \"${init_msg}\""
+
+  if [[ -n "$remote" ]]; then
+    git remote add origin "$remote"
+    info "Force push vers origin/${branch}..."
+    git push --force origin "$branch"
+    success "Dépôt remis à zéro sur GitHub ✓"
+  else
+    warn "Pas de remote configuré — reset local uniquement."
+  fi
+
+  echo ""
+  success "✅ Reset terminé. Historique effacé, fichiers intacts."
+}
+
 # ── Menu interactif ───────────────────────────────────────────────────────────
 main_menu() {
   while true; do
@@ -236,7 +301,7 @@ main_menu() {
       echo ""
     fi
 
-    echo -e "  ${BOLD}1${RESET}  Commit + Push            ${CYAN}← équivalent à ./git.sh \"msg\"${RESET}"
+    echo -e "  ${BOLD}1${RESET}  Commit + Push            ${CYAN}← Let's Go !${RESET}"
     echo -e "  ${BOLD}2${RESET}  Créer & pusher un tag"
     echo -e "  ${BOLD}3${RESET}  Pull / Synchroniser"
     echo -e "  ${BOLD}4${RESET}  Branches"
@@ -244,6 +309,7 @@ main_menu() {
     echo -e "  ${BOLD}6${RESET}  Historique (log)"
     echo -e "  ${BOLD}7${RESET}  Status"
     echo -e "  ${BOLD}0${RESET}  Initialiser un nouveau dépôt"
+    echo -e "  ${BOLD}r${RESET}  ${RED}Reset total${RESET} ${RED}(efface l'historique, garde les fichiers)${RESET}"
     echo -e "  ${BOLD}q${RESET}  Quitter"
     echo ""
     sep
@@ -251,7 +317,7 @@ main_menu() {
     read -rp "$(echo -e "${YELLOW}➜ ${RESET}Choix : ")" choice
 
     case "$choice" in
-      1|2|3|4|5|6|7) require_git ;;
+      1|2|3|4|5|6|7|r|R) require_git ;;
     esac
 
     case "$choice" in
@@ -263,34 +329,14 @@ main_menu() {
       6) do_log ;;
       7) do_status ;;
       0) do_init ;;
+      r|R) do_full_reset ;;
       q|Q) echo -e "\n${GREEN}À bientôt !${RESET}\n"; exit 0 ;;
       *) warn "Choix invalide." ;;
     esac
   done
 }
 
-# ── Bandeau branche ───────────────────────────────────────────────────────────
-show_branch_banner() {
-  local branch
-  branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "HEAD détachée")
-  local dirty=""
-  git diff --quiet 2>/dev/null || dirty=" ${RED}●${RESET}"
-  local remote
-  remote=$(git remote get-url origin 2>/dev/null | sed 's/.*github.com[:/]//' | sed 's/\.git$//' || echo "")
-
-  echo ""
-  echo -e "${BOLD}${BLUE}╔══════════════════════════════════════╗${RESET}"
-  printf "${BOLD}${BLUE}║${RESET}  🌿 %-34s${BOLD}${BLUE}║${RESET}\n" "${branch}${dirty@P}"
-  [[ -n "$remote" ]] && \
-  printf "${BOLD}${BLUE}║${RESET}  📦 %-34s${BOLD}${BLUE}║${RESET}\n" "$remote"
-  echo -e "${BOLD}${BLUE}╚══════════════════════════════════════╝${RESET}"
-  echo ""
-}
-
 # ── Point d'entrée ────────────────────────────────────────────────────────────
-# Avec argument → commit+push direct (comme ton ancien script)
-# Sans argument  → menu interactif
-
 if [[ $# -gt 0 ]]; then
   require_git
   show_branch_banner
