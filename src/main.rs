@@ -1,8 +1,3 @@
-extern crate crossterm;
-extern crate r_matrix;
-#[cfg(unix)]
-extern crate signal_hook;
-
 use std::io;
 #[cfg(unix)]
 use std::sync::Arc;
@@ -12,7 +7,7 @@ use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyModifiers};
 #[cfg(unix)]
-use signal_hook::consts::signal::{SIGINT, SIGQUIT, SIGTERM, SIGWINCH};
+use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
 #[cfg(unix)]
 use signal_hook::flag;
 
@@ -20,106 +15,88 @@ use r_matrix::Matrix;
 use r_matrix::Terminal;
 use r_matrix::config::Config;
 
+/// Exit signals sent from outside the terminal (e.g. `kill`).
+/// Resizes and Ctrl-C are received as terminal events instead.
 #[cfg(unix)]
-struct SignalFlags {
-    exit_signal: Arc<AtomicBool>,
-    resize_signal: Arc<AtomicBool>,
-}
+struct ExitSignal(Arc<AtomicBool>);
 
 #[cfg(unix)]
-impl SignalFlags {
+impl ExitSignal {
     fn new() -> io::Result<Self> {
-        // Create atomic bools that Unix signals can register.
         let exit_signal = Arc::new(AtomicBool::new(false));
-        let resize_signal = Arc::new(AtomicBool::new(false));
-
-        // Look for window-resize events.
-        flag::register(SIGWINCH, Arc::clone(&resize_signal))?;
-
-        // Look for exit-events.
-        flag::register(SIGINT, Arc::clone(&exit_signal))?;
-        flag::register(SIGTERM, Arc::clone(&exit_signal))?;
-        flag::register(SIGQUIT, Arc::clone(&exit_signal))?;
-
-        Ok(SignalFlags {
-            exit_signal,
-            resize_signal,
-        })
+        for signal in [SIGHUP, SIGINT, SIGTERM, SIGQUIT] {
+            flag::register(signal, Arc::clone(&exit_signal))?;
+        }
+        Ok(ExitSignal(exit_signal))
     }
 
-    fn should_exit(&self) -> bool {
-        self.exit_signal.swap(false, Ordering::Relaxed)
-    }
-
-    fn should_resize(&self) -> bool {
-        self.resize_signal.swap(false, Ordering::Relaxed)
+    fn received(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
     }
 }
 
 #[cfg(not(unix))]
-struct SignalFlags;
+struct ExitSignal;
 
 #[cfg(not(unix))]
-impl SignalFlags {
+impl ExitSignal {
     fn new() -> io::Result<Self> {
-        Ok(SignalFlags)
+        Ok(ExitSignal)
     }
 
-    fn should_exit(&self) -> bool {
+    fn received(&self) -> bool {
         false
     }
+}
 
-    fn should_resize(&self) -> bool {
-        false
+/// Handle a terminal event. Returns true if the program should exit.
+fn handle_event(
+    event: Event,
+    config: &mut Config,
+    terminal: &mut Terminal,
+    matrix: &mut Matrix,
+) -> io::Result<bool> {
+    match event {
+        Event::Resize(_, _) => {
+            // Make a new matrix for the new terminal size.
+            terminal.resize_window()?;
+            *matrix = Matrix::from_terminal_size();
+        }
+        Event::Key(key) => {
+            if config.screensaver
+                || key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Char('c' | 'C'))
+            {
+                return Ok(true);
+            }
+
+            if let KeyCode::Char(c) = key.code {
+                return Ok(config.handle_keypress(c));
+            }
+        }
+        _ => {}
     }
+    Ok(false)
 }
 
 fn main() -> io::Result<()> {
     // Get command line args
-    let mut config = Config::default();
+    let mut config = Config::from_args();
 
     // Save the terminal state and start up the terminal
     let mut terminal = Terminal::new()?;
 
-    let signals = SignalFlags::new()?;
+    let exit_signal = ExitSignal::new()?;
 
     // Create the board
-    let mut matrix: Matrix = Matrix::default();
+    let mut matrix = Matrix::from_terminal_size();
 
     // Main event loop
-    loop {
-        // SIGWINCH: Make a new matrix for the new terminal size.
-        if signals.should_resize() {
-            terminal.resize_window()?;
-            matrix = Matrix::default();
-        }
-        // Exit the program on exit signals (SIGINT, SIGTERM, SIGQUIT).
-        if signals.should_exit() {
-            break;
-        }
-
-        // Handle a terminal event.
-        if let Some(event) = terminal.get_event(Duration::from_millis(0))? {
-            match event {
-                Event::Resize(_, _) => {
-                    terminal.resize_window()?;
-                    matrix = Matrix::default();
-                }
-                Event::Key(key) => {
-                    if config.screensaver
-                        || key.modifiers.contains(KeyModifiers::CONTROL)
-                            && matches!(key.code, KeyCode::Char('c' | 'C'))
-                    {
-                        break;
-                    }
-
-                    if let KeyCode::Char(c) = key.code
-                        && config.handle_keypress(c)
-                    {
-                        break;
-                    }
-                }
-                _ => {}
+    'main: while !exit_signal.received() {
+        // Handle every pending terminal event.
+        while let Some(event) = terminal.get_event(Duration::ZERO)? {
+            if handle_event(event, &mut config, &mut terminal, &mut matrix)? {
+                break 'main;
             }
         }
 

@@ -16,10 +16,6 @@ struct Opt {
     /// All bold characters (overrides -b)
     all_bold: bool,
 
-    #[arg(short = 'l', long = "console")]
-    /// Linux mode (use matrix console font)
-    console: bool,
-
     #[arg(short = 'o', long = "oldstyle")]
     /// Use old-style scrolling
     oldstyle: bool,
@@ -27,10 +23,6 @@ struct Opt {
     #[arg(short = 's', long = "screensaver")]
     /// "Screensaver" mode, exits on first keystroke
     screensaver: bool,
-
-    #[arg(short = 'x', long = "xwindow")]
-    /// X window mode, use if your xterm is using mtx.pcf
-    xwindow: bool,
 
     #[arg(
         short = 'u',
@@ -66,18 +58,17 @@ fn validate_update(n: &str) -> Result<usize, String> {
 /// The global state object
 pub struct Config {
     pub bold: u8,
-    pub console: bool,
     pub oldstyle: bool,
     pub screensaver: bool,
-    pub xwindow: bool,
     pub update: usize,
     pub colour: MatrixColor,
     pub rainbow: bool,
     pub pause: bool,
 }
 
-impl Default for Config {
-    fn default() -> Self {
+impl Config {
+    /// Build the configuration from the command line arguments
+    pub fn from_args() -> Self {
         let opt = Opt::parse();
 
         let colour = match opt.colour.as_ref() {
@@ -94,19 +85,15 @@ impl Default for Config {
 
         Config {
             bold: if opt.all_bold { 2 } else { opt.bold as u8 },
-            console: opt.console,
             oldstyle: opt.oldstyle,
             screensaver: opt.screensaver,
-            xwindow: opt.xwindow,
             update: opt.update,
             rainbow: opt.rainbow,
             colour,
             pause: false,
         }
     }
-}
 
-impl Config {
     pub fn handle_keypress(&mut self, keypress: char) -> bool {
         if self.screensaver {
             return true;
@@ -155,5 +142,66 @@ impl Config {
             _ => {}
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> Config {
+        Config {
+            bold: 0,
+            oldstyle: false,
+            screensaver: false,
+            update: 4,
+            colour: MatrixColor::Green,
+            rainbow: false,
+            pause: false,
+        }
+    }
+
+    #[test]
+    fn update_delay_range() {
+        assert_eq!(validate_update("0"), Ok(0));
+        assert_eq!(validate_update("10"), Ok(10));
+        assert!(validate_update("11").is_err());
+        assert!(validate_update("-1").is_err());
+        assert!(validate_update("abc").is_err());
+    }
+
+    #[test]
+    fn quit_keys() {
+        assert!(config().handle_keypress('q'));
+        assert!(!config().handle_keypress('z'));
+
+        let mut screensaver = config();
+        screensaver.screensaver = true;
+        assert!(screensaver.handle_keypress('z'));
+    }
+
+    #[test]
+    fn option_keys() {
+        let mut c = config();
+        c.handle_keypress('B');
+        assert_eq!(c.bold, 2);
+        c.handle_keypress('n');
+        assert_eq!(c.bold, 0);
+
+        c.handle_keypress('p');
+        assert!(c.pause);
+        c.handle_keypress('P');
+        assert!(!c.pause);
+
+        c.handle_keypress('7');
+        assert_eq!(c.update, 7);
+        c.handle_keypress('0');
+        assert_eq!(c.update, 0);
+
+        c.handle_keypress('r');
+        assert!(c.rainbow);
+        c.handle_keypress('!');
+        assert!(!c.rainbow);
+        assert_eq!(c.colour, MatrixColor::Red);
     }
 }
