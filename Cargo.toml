@@ -5,7 +5,7 @@ version = "2.0.2"
 edition = "2024"
 authors = ["Lucas Rooyakkers <lucas.rooyakkers@protonmail.com>"]
 license = 'GPL-3.0-or-later'
-repository = "https://github.com/Fierthraix/rmatrix"
+repository = "https://github.com/Antidote1911/rmatrix"
 
 [dependencies]
 crossterm = "0.29.0"
@@ -13,4 +13,4 @@ rand = "0.10.3"
 clap = { version = "4", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
-signal-hook = { version = "0.4.5", features = ["extended-siginfo"] }
+signal-hook = "0.4.5"

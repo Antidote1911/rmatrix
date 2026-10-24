@@ -1,6 +1,3 @@
-extern crate crossterm;
-extern crate rand;
-
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io::{self, Stdout, Write};
@@ -29,8 +26,8 @@ fn random_range(range: Range<usize>) -> usize {
 }
 
 fn rand_char() -> char {
-    let (randnum, randmin) = (93, 33);
-    RNG.with(|rng| (*rng).borrow_mut().random::<u8>() % randnum + randmin) as char
+    // Printable ASCII characters, from '!' to '}'
+    random_range(33..126) as u8 as char
 }
 
 fn coin_flip() -> bool {
@@ -147,20 +144,20 @@ impl std::ops::Index<usize> for Matrix {
     }
 }
 
-impl Default for Matrix {
+impl Matrix {
     /// Create a new matrix with the dimensions of the screen
-    fn default() -> Self {
-        // Get the screen dimensions
+    pub fn from_terminal_size() -> Self {
         let (lines, cols) = get_term_size();
+        Self::with_size(lines, cols)
+    }
 
-        // Create the matrix
+    /// Create a new matrix with the given number of lines and columns
+    fn with_size(lines: usize, cols: usize) -> Self {
         Matrix {
             m: (0..cols).map(|_| Column::new(lines)).collect(),
         }
     }
-}
 
-impl Matrix {
     fn num_columns(&self) -> usize {
         self.m.len()
     }
@@ -241,8 +238,9 @@ impl Matrix {
     pub fn draw(&self, terminal: &mut Terminal, config: &Config) -> io::Result<()> {
         let stdout = &mut terminal.stdout;
 
-        //TODO: Use an iterator or something nicer
         for j in 1..self.num_lines() {
+            // Each line is written in one go: the cursor only moves at its start.
+            queue!(stdout, cursor::MoveTo(0, j as u16 - 1))?;
             // Saving the last colour allows us to change colour only when the colour changes.
             let mut last_colour = self[0][j].color;
             queue!(stdout, SetForegroundColor(last_colour.as_crossterm()))?;
@@ -257,7 +255,10 @@ impl Matrix {
                     self[i][j].color
                 };
 
-                queue!(stdout, cursor::MoveTo(2 * i as u16, j as u16 - 1))?; // Move the cursor
+                // Columns are separated by a space (not after the last one, to avoid wrapping).
+                if i > 0 {
+                    queue!(stdout, Print(' '))?;
+                }
                 if last_colour != mcolour {
                     // Set the colour in the terminal.
                     queue!(stdout, SetForegroundColor(mcolour.as_crossterm()))?;
@@ -372,5 +373,74 @@ fn get_term_size() -> (usize, usize) {
             }
         }
         Err(_) => (10, 10),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> Config {
+        Config {
+            bold: 0,
+            oldstyle: false,
+            screensaver: false,
+            update: 4,
+            colour: MatrixColor::Green,
+            rainbow: false,
+            pause: false,
+        }
+    }
+
+    #[test]
+    fn rand_char_is_printable() {
+        for _ in 0..1000 {
+            let c = rand_char();
+            assert!(('!'..='}').contains(&c));
+        }
+    }
+
+    fn check_arrange(config: &Config) {
+        let mut matrix = Matrix::with_size(20, 30);
+        for _ in 0..500 {
+            matrix.arrange(config);
+            assert_eq!(matrix.num_columns(), 30);
+            assert_eq!(matrix.num_lines(), 20);
+            for col in &matrix.m {
+                for block in &col.col {
+                    assert!(block.val == ' ' || ('!'..='}').contains(&block.val));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn arrange_keeps_dimensions_and_chars() {
+        check_arrange(&config());
+    }
+
+    #[test]
+    fn arrange_oldstyle_keeps_dimensions_and_chars() {
+        let mut config = config();
+        config.oldstyle = true;
+        check_arrange(&config);
+    }
+
+    #[test]
+    fn rainbow_uses_several_colours() {
+        let mut config = config();
+        config.rainbow = true;
+        let mut matrix = Matrix::with_size(20, 30);
+        for _ in 0..200 {
+            matrix.arrange(&config);
+        }
+        let colours: std::collections::HashSet<_> = matrix
+            .m
+            .iter()
+            .flat_map(|col| col.col.iter())
+            .filter(|block| !block.is_space())
+            .map(|block| block.color as u8)
+            .collect();
+        assert!(colours.len() > 1);
     }
 }
