@@ -8,9 +8,13 @@ use super::MatrixColor;
     about = "Shows a scrolling 'Matrix' like screen in your terminal"
 )]
 struct Opt {
-    #[arg(short = 'b', action = clap::ArgAction::Count)]
+    #[arg(short = 'b')]
     /// Bold characters on
-    bold: u8,
+    bold: bool,
+
+    #[arg(short = 'B')]
+    /// All bold characters (overrides -b)
+    all_bold: bool,
 
     #[arg(short = 'l', long = "console")]
     /// Linux mode (use matrix console font)
@@ -34,7 +38,7 @@ struct Opt {
         default_value = "4",
         value_parser = validate_update
     )]
-    /// Screen update delay (1-10)
+    /// Screen update delay (0-10)
     update: usize,
 
     #[arg(
@@ -56,7 +60,7 @@ fn validate_update(n: &str) -> Result<usize, String> {
     {
         return Ok(n);
     }
-    Err("must be a number between 1 and 10".to_string())
+    Err("must be a number between 0 and 10".to_string())
 }
 
 /// The global state object
@@ -89,7 +93,7 @@ impl Default for Config {
         };
 
         Config {
-            bold: opt.bold,
+            bold: if opt.all_bold { 2 } else { opt.bold as u8 },
             console: opt.console,
             oldstyle: opt.oldstyle,
             screensaver: opt.screensaver,

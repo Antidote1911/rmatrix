@@ -123,8 +123,10 @@ fn main() -> io::Result<()> {
             }
         }
 
-        // Update and redraw the board.
-        matrix.arrange(&config);
+        // Update and redraw the board (frozen while paused).
+        if !config.pause {
+            matrix.arrange(&config);
+        }
         matrix.draw(&mut terminal, &config)?;
     }
 
