@@ -14,7 +14,7 @@ use config::Config;
 
 use crossterm::cursor;
 use crossterm::event::{self, Event};
-use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
+use crossterm::style::{Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{self, Clear, ClearType};
 use crossterm::{execute, queue};
 use rand::RngExt;
@@ -246,6 +246,8 @@ impl Matrix {
             // Saving the last colour allows us to change colour only when the colour changes.
             let mut last_colour = self[0][j].color;
             queue!(stdout, SetForegroundColor(last_colour.as_crossterm()))?;
+            let mut last_bold = false;
+            queue!(stdout, SetAttribute(Attribute::NormalIntensity))?;
 
             for i in 0..self.num_columns() {
                 // Pick the colour we need
@@ -260,6 +262,17 @@ impl Matrix {
                     // Set the colour in the terminal.
                     queue!(stdout, SetForegroundColor(mcolour.as_crossterm()))?;
                     last_colour = mcolour;
+                }
+                // -b makes the white heads bold, -B makes everything bold.
+                let bold = config.bold >= 2 || (config.bold == 1 && self[i][j].white);
+                if last_bold != bold {
+                    let attribute = if bold {
+                        Attribute::Bold
+                    } else {
+                        Attribute::NormalIntensity
+                    };
+                    queue!(stdout, SetAttribute(attribute))?;
+                    last_bold = bold;
                 }
                 // Draw the character.
                 queue!(stdout, Print(self[i][j].val))?;
@@ -283,7 +296,12 @@ impl Terminal {
         terminal::enable_raw_mode()?;
 
         let mut stdout = io::stdout();
-        if let Err(error) = execute!(stdout, cursor::Hide, Clear(ClearType::All)) {
+        if let Err(error) = execute!(
+            stdout,
+            terminal::EnterAlternateScreen,
+            cursor::Hide,
+            Clear(ClearType::All)
+        ) {
             let _ = terminal::disable_raw_mode();
             return Err(error);
         }
@@ -315,7 +333,12 @@ impl Terminal {
 
     fn restore(&mut self) -> io::Result<()> {
         if self.active {
-            let terminal_result = execute!(self.stdout, ResetColor, cursor::Show);
+            let terminal_result = execute!(
+                self.stdout,
+                ResetColor,
+                cursor::Show,
+                terminal::LeaveAlternateScreen
+            );
             let raw_mode_result = terminal::disable_raw_mode();
             self.active = false;
             terminal_result?;
