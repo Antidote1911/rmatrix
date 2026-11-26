@@ -6,11 +6,27 @@ edition = "2024"
 authors = ["Lucas Rooyakkers <lucas.rooyakkers@protonmail.com>"]
 license = 'GPL-3.0-or-later'
 repository = "https://github.com/Antidote1911/rmatrix"
+readme = "README.md"
+keywords = ["matrix", "cmatrix", "terminal", "screensaver"]
+categories = ["command-line-utilities"]
+rust-version = "1.88"
+exclude = ["rmatrix.gif", "git.sh", ".github/"]
+
+[[bin]]
+name = "rmatrix"
+path = "src/main.rs"
 
 [dependencies]
 crossterm = "0.29.0"
 rand = "0.10.3"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4.6.12"
+clap_mangen = "0.3.4"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.4.5"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

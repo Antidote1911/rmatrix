@@ -3,9 +3,9 @@ use std::io;
 use std::sync::Arc;
 #[cfg(unix)]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crossterm::event::{Event, KeyCode, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 #[cfg(unix)]
 use signal_hook::consts::signal::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
 #[cfg(unix)]
@@ -49,6 +49,9 @@ impl ExitSignal {
     }
 }
 
+/// How often exit signals are checked while the animation is paused.
+const PAUSE_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 /// Handle a terminal event. Returns true if the program should exit.
 fn handle_event(
     event: Event,
@@ -58,11 +61,14 @@ fn handle_event(
 ) -> io::Result<bool> {
     match event {
         Event::Resize(_, _) => {
-            // Make a new matrix for the new terminal size.
+            // Fit the matrix to the new terminal size, keeping the streams.
             terminal.resize_window()?;
-            *matrix = Matrix::from_terminal_size();
+            matrix.resize_to_terminal();
+            // Redraw now: when paused, nothing else would.
+            matrix.draw(terminal, config)?;
         }
-        Event::Key(key) => {
+        // Only key presses count: Windows also reports key releases.
+        Event::Key(key) if key.kind == KeyEventKind::Press => {
             if config.screensaver
                 || key.modifiers.contains(KeyModifiers::CONTROL)
                     && matches!(key.code, KeyCode::Char('c' | 'C'))
@@ -70,8 +76,12 @@ fn handle_event(
                 return Ok(true);
             }
 
-            if let KeyCode::Char(c) = key.code {
-                return Ok(config.handle_keypress(c));
+            match key.code {
+                KeyCode::Char(c) => return Ok(config.handle_keypress(c)),
+                // The arrows work on every keyboard layout, unlike the digits.
+                KeyCode::Up => config.speed_up(),
+                KeyCode::Down => config.slow_down(),
+                _ => {}
             }
         }
         _ => {}
@@ -92,19 +102,25 @@ fn main() -> io::Result<()> {
     let mut matrix = Matrix::from_terminal_size();
 
     // Main event loop
-    'main: while !exit_signal.received() {
-        // Handle every pending terminal event.
-        while let Some(event) = terminal.get_event(Duration::ZERO)? {
+    let mut next_frame = Instant::now();
+    while !exit_signal.received() {
+        // Wait for the next frame, handling terminal events as soon as they arrive.
+        let timeout = next_frame.saturating_duration_since(Instant::now());
+        if let Some(event) = terminal.get_event(timeout)? {
             if handle_event(event, &mut config, &mut terminal, &mut matrix)? {
-                break 'main;
+                break;
             }
+            continue;
         }
 
-        // Update and redraw the board (frozen while paused).
-        if !config.pause {
+        if config.pause {
+            // Nothing changes on screen: just keep checking for events and signals.
+            next_frame = Instant::now() + PAUSE_POLL_INTERVAL;
+        } else {
+            next_frame = Instant::now() + config.frame_delay();
             matrix.arrange(&config);
+            matrix.draw(&mut terminal, &config)?;
         }
-        matrix.draw(&mut terminal, &config)?;
     }
 
     terminal.finish()
